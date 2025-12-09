@@ -535,7 +535,37 @@ class GameState(State):
     #     - A clear base case to stop recursion when all parts are done
     #   Avoid any for/while loops — recursion alone must handle the repetition.
     def calculate_gold_reward(self, playerInfo, stage=0):
-            return 0
+        if stage == 0:
+            blind = playerInfo.levelManager.curSubLevel.blindType
+            if blind == "SMALL":
+                base = 4
+            elif blind == "BIG":
+                base = 8
+            elif blind == "BOSS":
+                base = 10
+            else:
+                base = 0
+            return self.calculate_gold_reward(playerInfo, 1, base, 0)
+
+        if stage == 1:
+            score = playerInfo.roundScore
+            place = playerInfo.levelManager.curSubLevel.score
+            if place > 0:
+                difference = score - place
+                ratio = difference / place
+                two_bonus = ratio * 5
+                if two_bonus < 0:
+                    two_bonus = 0
+                if two_bonus > 5:
+                    two_bonus = 5
+                bonus = two_bonus
+            else:
+                bonus = 0
+            return self.calculate_gold_reward(playerInfo, 2, base, bonus)
+
+        if stage == 2:
+            total = base + bonus
+            return total
 
     def updateCards(self, posX, posY, cardsDict, cardsList, scale=1.5, spacing=90, baseYOffset=-20, leftShift=40):
         cardsDict.clear()
@@ -555,6 +585,25 @@ class GameState(State):
     #   until the entire hand is ordered correctly.
     def SortCards(self, sort_by: str = "suit"):
         suitOrder = [Suit.HEARTS, Suit.CLUBS, Suit.DIAMONDS, Suit.SPADES]         # Define the order of suits
+        hand = self.hand
+        n = len(hand)
+
+
+        def card_key(card):
+            if sort_by == "rank":
+                # Rank first, then suit as tiebreaker
+                return (card.rank.value, suitOrder.index(card.suit))
+            else:
+                return (suitOrder.index(card.suit), card.rank.value)
+
+        for i in range(n - 1):
+            for j in range(i + 1, n):
+                key_i = card_key(hand[i])
+                key_j = card_key(hand[j])
+
+                if key_j < key_i:
+                    hand[i], hand[j] = hand[j], hand[i]
+
         self.updateCards(400, 520, self.cards, self.hand, scale=1.2)
 
     def checkHoverCards(self):
@@ -783,20 +832,118 @@ class GameState(State):
 
         procrastinate = False
 
-        # commit modified player multiplier and chips
+        if "The Joker" in owned:
+            hand_mult += 4
+            self.activated_jokers.add("The Joker")
+        if "Micheal Myers" in owned:
+            hand_mult += random.randint(0, 23)
+            self.activated_jokers.add("Micheal Myers")
+        if "Fibonacci" in owned:
+            for card in self.cardsSelectedList:
+                if card.value in [1, 2, 3, 5, 8]:
+                    hand_mult += 8
+            self.activated_jokers.add("Fibonacci")
+        if "Gauntlet" in owned:
+            total_chips += 250
+            self.hand_size = max(0, self.hand_size - 2)
+            self.activated_jokers.add("Gauntlet")
+        if "Ogre" in owned:
+            hand_mult += 3 * len(self.playerInfo.jokersOwned)
+            self.activated_jokers.add("Ogre")
+        if "Straw Hat" in owned:
+            total_chips += 100
+            total_chips -= 5 * getattr(self, "handsPlayedThis Round", 0)
+            self.activated_jokers.add("Straw Hat")
+        if "Hog Rider" in owned:
+            if hasattr(self, "isStraight") and self.isStraight(self.cardsSelectedList):
+                total_chips += 100
+            self.activated_jokers.add("Hog Rider")
+        if "? Block" in owned:
+            if len(self.cardsSelectedList) == 4:
+                total_chips += 4
+            self.activated_jokers.add("Block")
+        if "Hogwarts" in owned:
+            for card in self.cardsSelectedList:
+                if card.value == 1:
+                    hand_mult += 4
+                    total_chips += 20
+                self.activated_jokers.add("Hogwarts")
+        if "802" in owned:
+            if getattr(self, "amountOfHands", 0) == 0:
+                procrastinate = True
+            self.activated_jokers.add("802")
+        if "Sonic" in owned:
+            for card in self.cardsSelectedList:
+                if card.value == 7:
+                    hand_mult += 10
+            total_chips += 20
+            self.activated_jokers.add("Sonic")
+        if "Pikachu" in owned:
+            for card in self.cardsSelectedList:
+                if card.value == 10:
+                    total_chips += 40
+                    hand_mult += 6
+            self.activated_jokers.add("Pikachu")
+        if "Shadow" in owned:
+            values = [c.value for c in self.cardsSelectedList]
+            if len(values) != len(set(values)):
+                hand_mult += 15
+            self.activated_jokers.add("Shadow")
+        if "Link" in owned:
+            values = [c.value for c in self.cardsSelectedList]
+            if values == sorted(values):
+                hand_mult += 12
+                total_chips += 40
+            self.activated_jokers.add("Link")
+        if "Kirby" in owned:
+            unique_vals = len(set([c.value for c in self.cardsSelectedList]))
+            hand_mult += 2 * unique_vals
+            self.activated_jokers.add("Kirby")
+        if "Steve" in owned:
+            for card in self.cardsSelectedList:
+                if card.value % 2 == 0:
+                    total_chips += 4
+            self.activated_jokers.add("Steve")
+
+
         self.playerInfo.playerMultiplier = hand_mult
         self.playerInfo.playerChips = total_chips
         self.playerInfo.curHandOfPlayer = hand_name
         self.playerInfo.curHandText = self.playerInfo.textFont1.render(self.playerInfo.curHandOfPlayer, False, 'white')
 
-        # compute amount that will be added to round when timer expires
+
         added_to_round = total_chips * hand_mult
-        # Procrastination doubles the final hand's addition
         if 'procrastinate' in locals() and procrastinate:
             added_to_round *= 2
-        self.pending_round_add = added_to_round  # defer actual addition until timer ends
+        self.pending_round_add = added_to_round
 
-        # prepare on-screen feedback
+
+        self.playedHandTextSurface = self.playerInfo.textFont1.render(hand_name, True, 'yellow')
+        score_breakdown_text = f"(Hand: {hand_chips} + Cards: {card_chips_sum}) Chips | x{hand_mult} Mult -> +{added_to_round}"
+        self.scoreBreakdownTextSurface = self.playerInfo.textFont2.render(score_breakdown_text, True, 'white')
+
+        self.playHandStartTime = pygame.time.get_ticks()
+        self.playHandActive = True
+        self.cardsSelectedRect.clear()
+
+        start_x, start_y, spacing = 20, 20, 95
+        for i, card in enumerate(self.cardsSelectedList):
+            w, h = card.scaled_image.get_width(), card.scaled_image.get_height()
+            self.cardsSelectedRect[card] = pygame.Rect(start_x + i * spacing, start_y, w, h)
+
+
+        self.playerInfo.playerMultiplier = hand_mult
+        self.playerInfo.playerChips = total_chips
+        self.playerInfo.curHandOfPlayer = hand_name
+        self.playerInfo.curHandText = self.playerInfo.textFont1.render(self.playerInfo.curHandOfPlayer, False, 'white')
+
+
+        added_to_round = total_chips * hand_mult
+        if 'procrastinate' in locals() and procrastinate:
+            added_to_round *= 2
+        self.pending_round_add = added_to_round
+
+
         self.playedHandTextSurface = self.playerInfo.textFont1.render(hand_name, True, 'yellow')
         score_breakdown_text = f"(Hand: {hand_chips} + Cards: {card_chips_sum}) Chips | x{hand_mult} Mult -> +{added_to_round}"
         self.scoreBreakdownTextSurface = self.playerInfo.textFont2.render(score_breakdown_text, True, 'white')
@@ -817,4 +964,26 @@ class GameState(State):
     #   recursion finishes, reset card selections, clear any display text or tracking lists, and
     #   update the visual layout of the player's hand.
     def discardCards(self, removeFromHand: bool):
-        self.updateCards(400, 520, self.cards, self.hand, scale=1.2)
+        if len(self.cardsSelectedList) == 0:
+
+            cards_to_draw = 8 - len(self.hand)
+            if cards_to_draw > 0:
+                new_cards = State.deckManager.dealCards(self.deck, cards_to_draw)
+                self.hand.extend(new_cards)
+
+            self.cardsSelectedList = []
+            self.selectedCardIndices = []
+            self.playedHandNameList = []
+
+            self.updateCards(400, 520, self.cards, self.hand, scale=1.2)
+            return
+
+
+        card = self.cardsSelectedList.pop(0)
+
+        if removeFromHand and card in self.hand:
+            self.hand.remove(card)
+
+
+        self.discardCards(removeFromHand)
+
